@@ -32,6 +32,11 @@ For more information on the Canopy Network Protocol visit [https://canopynetwork
 
 ⪢ Canopy is in `Betanet` 🚀 ➝ learn more about the [road-to-mainnet](https://www.canopynetwork.org/learn-more/road-to-mainnet)
 
+## Standard
+
+⪢ Canopy is an Ethereum-RPC compatible L1, so it can plug into existing Ethereum exchange, wallet, and indexer tooling for native transfers,
+  including MetaMask. [spec](./fsm/ethereum.md)
+
 ## Protocol Documentation
 
 ➪ Check out the Canopy Network wiki:  [https://canopy-network.gitbook.io/docs](https://canopy-network.gitbook.io/docs)
