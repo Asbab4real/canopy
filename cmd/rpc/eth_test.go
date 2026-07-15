@@ -59,6 +59,24 @@ func TestEthChainIDUsesV2SigningDomainImmediately(t *testing.T) {
 	require.Equal(t, "0x140000001", hexutil.Uint64(result.(hexutil.Uint64)).String())
 }
 
+func TestEthGetBalanceIncludesVestedFunds(t *testing.T) {
+	log := lib.NewDefaultLogger()
+	db, err := store.NewStoreInMemory(log)
+	require.NoError(t, err)
+	sm := newTestRPCStateMachine(t, db, log)
+	address := crypto.NewAddress(bytes.Repeat([]byte{1}, crypto.AddressSize))
+	require.NoError(t, sm.SetAccount(&fsm.Account{Address: address.Bytes(), Amount: 100,
+		VestingAmount: 100, VestingStartHeight: 1, VestingCliffHeight: 5, VestingEndHeight: 10}))
+	_, err = db.Commit()
+	require.NoError(t, err)
+	setFSMHeight(t, sm, 1)
+
+	result, rpcErr := (&Server{controller: &controller.Controller{FSM: sm}}).EthGetBalance([]any{"0x" + address.String(), latestBlockTag})
+	require.NoError(t, rpcErr)
+	balance := result.(hexutil.Big)
+	require.Equal(t, fsm.UpscaleTo18Decimals(100), (*big.Int)(&balance))
+}
+
 func TestEthFeeHistoryTruncatesAtGenesis(t *testing.T) {
 	log := lib.NewDefaultLogger()
 	db, storeErr := store.NewStoreInMemory(log)
@@ -130,18 +148,6 @@ func TestPendingCacheRejectsNewEntriesAtCapacity(t *testing.T) {
 	require.Equal(t, ethPendingTxMaxEntries, pendingEthTxCacheSize.Load())
 }
 
-func TestPendingEthNonceConflictAndRemoval(t *testing.T) {
-	clearAllPendingEthTxsForTest()
-	defer clearAllPendingEthTxsForTest()
-	tx := &lib.Transaction{Nonce: 4, Signature: &lib.Signature{PublicKey: []byte{1}}}
-	cachePendingEthTx("0x1", tx)
-
-	require.True(t, pendingEthNonceExists(&lib.Transaction{Nonce: 4, Signature: &lib.Signature{PublicKey: []byte{1}}}))
-	require.False(t, pendingEthNonceExists(&lib.Transaction{Nonce: 5, Signature: &lib.Signature{PublicKey: []byte{1}}}))
-	removePendingEthTx("0x1")
-	require.Zero(t, pendingEthTxCacheSize.Load())
-}
-
 func TestEthSendRawTransactionInsertsSynchronously(t *testing.T) {
 	clearAllPendingEthTxsForTest()
 	defer clearAllPendingEthTxsForTest()
@@ -163,6 +169,67 @@ func TestEthSendRawTransactionInsertsSynchronously(t *testing.T) {
 	require.True(t, mempool.Contains(crypto.HashString(bz)))
 	_, replacementErr := server.EthSendRawTransaction([]any{hexutil.Encode(raw)})
 	require.ErrorContains(t, replacementErr, "replacement transaction underpriced")
+}
+
+func TestEthSendRawTransactionReplacementPolicy(t *testing.T) {
+	clearAllPendingEthTxsForTest()
+	defer clearAllPendingEthTxsForTest()
+	key, err := ethCrypto.GenerateKey()
+	require.NoError(t, err)
+	mempool := &controller.Mempool{Mempool: lib.NewMempool(lib.DefaultMempoolConfig()), L: &sync.Mutex{}}
+	ctrl := &controller.Controller{Mempool: mempool}
+	setUnexportedField(t, ctrl, "isSyncing", &atomic.Bool{})
+	server := &Server{controller: ctrl}
+	originalRaw := mustNewSignedRawEthTxForRPCWithFees(t, key, 0, 10_000_000_000, 10)
+	original, errI := fsm.RLPToCanopyTransactionV2(originalRaw)
+	require.NoError(t, errI)
+	_, err = server.EthSendRawTransaction([]any{hexutil.Encode(originalRaw)})
+	require.NoError(t, err)
+
+	for _, raw := range [][]byte{
+		mustNewSignedRawEthTxForRPCWithFees(t, key, 0, 10_999_999_999, 11),
+		mustNewSignedRawEthTxForRPCWithFees(t, key, 0, 11_000_000_000, 10),
+	} {
+		_, err = server.EthSendRawTransaction([]any{hexutil.Encode(raw)})
+		require.ErrorContains(t, err, "replacement transaction underpriced")
+	}
+	replacementRaw := mustNewSignedRawEthTxForRPCWithFees(t, key, 0, 11_000_000_000, 11)
+	replacement, errI := fsm.RLPToCanopyTransactionV2(replacementRaw)
+	require.NoError(t, errI)
+	_, err = server.EthSendRawTransaction([]any{hexutil.Encode(replacementRaw)})
+	require.NoError(t, err)
+	originalBz, errI := lib.Marshal(original)
+	require.NoError(t, errI)
+	replacementBz, errI := lib.Marshal(replacement)
+	require.NoError(t, errI)
+	require.False(t, mempool.Contains(crypto.HashString(originalBz)))
+	require.True(t, mempool.Contains(crypto.HashString(replacementBz)))
+	_, cached := pseudoPendingTxsMap.Load(ethHashStringFromTransaction(original))
+	require.False(t, cached)
+}
+
+func TestEthSendRawTransactionIgnoresStaleReplacementCache(t *testing.T) {
+	clearAllPendingEthTxsForTest()
+	defer clearAllPendingEthTxsForTest()
+	key, err := ethCrypto.GenerateKey()
+	require.NoError(t, err)
+	raw := mustNewSignedRawEthTxForRPCWithKey(t, key, 0)
+	tx, errI := fsm.RLPToCanopyTransactionV2(raw)
+	require.NoError(t, errI)
+	bz, errI := lib.Marshal(tx)
+	require.NoError(t, errI)
+	mempool := &controller.Mempool{Mempool: lib.NewMempool(lib.DefaultMempoolConfig()), L: &sync.Mutex{}}
+	ctrl := &controller.Controller{Mempool: mempool}
+	setUnexportedField(t, ctrl, "isSyncing", &atomic.Bool{})
+	server := &Server{controller: ctrl}
+	_, err = server.EthSendRawTransaction([]any{hexutil.Encode(raw)})
+	require.NoError(t, err)
+	mempool.L.Lock()
+	mempool.DeleteTransaction(bz)
+	mempool.L.Unlock()
+	_, err = server.EthSendRawTransaction([]any{hexutil.Encode(raw)})
+	require.NoError(t, err)
+	require.True(t, mempool.Contains(crypto.HashString(bz)))
 }
 
 func TestEthSendRawTransactionContinuesWhenPendingCacheIsFull(t *testing.T) {
@@ -375,6 +442,10 @@ func clearAllPendingEthTxsForTest() {
 }
 
 func mustNewSignedRawEthTxForRPCWithKey(t *testing.T, key *ecdsa.PrivateKey, nonce uint64) []byte {
+	return mustNewSignedRawEthTxForRPCWithFees(t, key, nonce, 10_000_000_000, 1)
+}
+
+func mustNewSignedRawEthTxForRPCWithFees(t *testing.T, key *ecdsa.PrivateKey, nonce uint64, feeCap, tipCap int64) []byte {
 	t.Helper()
 	recipient := common.HexToAddress("0x0000000000000000000000000000000000000004")
 	evmChainID, ok := fsm.CanopyIdsToEVMChainIdV2(1, 1)
@@ -383,8 +454,8 @@ func mustNewSignedRawEthTxForRPCWithKey(t *testing.T, key *ecdsa.PrivateKey, non
 	ethTx := types.MustSignNewTx(key, types.LatestSignerForChainID(chainID), &types.DynamicFeeTx{
 		ChainID:   chainID,
 		Nonce:     nonce,
-		GasTipCap: big.NewInt(1),
-		GasFeeCap: big.NewInt(10_000_000_000),
+		GasTipCap: big.NewInt(tipCap),
+		GasFeeCap: big.NewInt(feeCap),
 		Gas:       21_000,
 		To:        &recipient,
 		Value:     big.NewInt(1_000_000_000_000),

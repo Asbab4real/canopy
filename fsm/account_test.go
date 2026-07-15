@@ -215,6 +215,35 @@ func TestAccountVestingAccounting(t *testing.T) {
 	}
 }
 
+func TestAccountVestedAmountMaxValuesIsMonotonic(t *testing.T) {
+	sm := newTestStateMachine(t)
+	account := &Account{
+		Amount:             math.MaxUint64,
+		VestingAmount:      math.MaxUint64,
+		VestingStartHeight: 0,
+		VestingCliffHeight: 0,
+		VestingEndHeight:   math.MaxUint64,
+	}
+	heights := []uint64{
+		0,
+		1,
+		2,
+		math.MaxUint64 / 4,
+		math.MaxUint64 / 2,
+		math.MaxUint64 - 2,
+		math.MaxUint64 - 1,
+		math.MaxUint64,
+	}
+	var previous uint64
+	for _, height := range heights {
+		sm.height = height
+		vested := sm.AccountVestedAmount(account)
+		require.GreaterOrEqual(t, vested, previous)
+		require.Equal(t, height, vested)
+		previous = vested
+	}
+}
+
 func TestAccountSubRespectsVesting(t *testing.T) {
 	sm := newTestStateMachine(t)
 	sm.height = 4

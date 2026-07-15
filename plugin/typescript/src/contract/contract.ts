@@ -183,7 +183,7 @@ export class ContractAsync {
         if (msg) {
             switch (msgType) {
                 case 'MessageSend':
-                    return ContractAsync.DeliverMessageSend(contract, msg, request.tx?.fee as Long);
+                    return ContractAsync.DeliverMessageSend(contract, msg, request.tx?.fee as Long, request.tx?.memo || '');
                 default:
                     return { error: ErrInvalidMessageCast() };
             }
@@ -196,7 +196,8 @@ export class ContractAsync {
     static async DeliverMessageSend(
         contract: Contract,
         msg: any,
-        fee: Long | number | undefined
+        fee: Long | number | undefined,
+        memo: string
     ): Promise<any> {
         const fromQueryId = Long.fromNumber(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER));
         const toQueryId = Long.fromNumber(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER));
@@ -288,7 +289,7 @@ export class ContractAsync {
         const toAccount = isSelfTransfer ? from : to;
 
         // get amounts as Long
-        const newFromAmount = fromAmount.subtract(amountToDeduct);
+        const newFromAmount = fromAmount.subtract(isSelfTransfer ? feeAmount : amountToDeduct);
         const toAmount = Long.isLong(toAccount?.amount)
             ? toAccount.amount.toUnsigned()
             : Long.fromNumber((toAccount?.amount as number) || 0, true);
@@ -325,13 +326,15 @@ export class ContractAsync {
         let writeResp: any;
         let writeErr: IPluginError | null;
 
-        // Retain drained accounts so protobuf unknown fields remain in state.
+        // Retain drained accounts only when they carry nonce state or core will advance the nonce after RLP.V2 delivery.
+        const retainFrom = !newFromAmount.isZero() || !Long.fromValue(from?.nonce || 0).isZero() || memo === 'RLP.V2';
         [writeResp, writeErr] = await contract.plugin.StateWrite(contract, {
             sets: [
                 { key: feePoolKey, value: newFeePoolBytes },
-                { key: toKey, value: newToBytes },
-                { key: fromKey, value: newFromBytes }
-            ]
+                ...(!isSelfTransfer ? [{ key: toKey, value: newToBytes }] : []),
+                ...(retainFrom ? [{ key: fromKey, value: newFromBytes }] : [])
+            ],
+            deletes: retainFrom ? [] : [{ key: fromKey }]
         });
 
         if (writeErr) {

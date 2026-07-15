@@ -143,7 +143,7 @@ class Contract(
                 .build()
 
         return when (msg) {
-            is MessageSend -> deliverMessageSend(msg, request.tx.fee)
+            is MessageSend -> deliverMessageSend(msg, request.tx.fee, request.tx.memo)
             else -> PluginDeliverResponse.newBuilder()
                 .setError(ErrInvalidMessageCast().toProto())
                 .build()
@@ -192,7 +192,7 @@ class Contract(
     /**
      * DeliverMessageSend handles a send message
      */
-    private fun deliverMessageSend(msg: MessageSend, fee: Long): PluginDeliverResponse {
+    private fun deliverMessageSend(msg: MessageSend, fee: Long, memo: String): PluginDeliverResponse {
         val fromKey = keyForAccount(msg.fromAddress.toByteArray())
         val toKey = keyForAccount(msg.toAddress.toByteArray())
         val feePoolKey = keyForFeePool(config.chainId)
@@ -262,18 +262,21 @@ class Contract(
         }
 
         // Update balances
-        val newFrom = from.toBuilder().setAmount(from.amount - amountToDeduct).build()
+        val newFrom = from.toBuilder().setAmount(from.amount - (if (isSelfTransfer) fee else amountToDeduct)).build()
         val newTo = to.toBuilder().setAmount(to.amount + msg.amount).build()
         val newFeePool = feePool.toBuilder().setAmount(feePool.amount + fee).build()
 
-        // Retain drained accounts so protobuf unknown fields remain in state.
+        // Retain drained accounts only when they carry nonce state or core will advance the nonce after RLP.V2 delivery.
         val writeRequest = PluginStateWriteRequest.newBuilder()
             .addSets(PluginSetOp.newBuilder().setKey(ByteString.copyFrom(feePoolKey)).setValue(ByteString.copyFrom(newFeePool.toByteArray())).build())
-            .addSets(PluginSetOp.newBuilder().setKey(ByteString.copyFrom(toKey)).setValue(ByteString.copyFrom(newTo.toByteArray())).build())
-            .addSets(PluginSetOp.newBuilder().setKey(ByteString.copyFrom(fromKey)).setValue(ByteString.copyFrom(newFrom.toByteArray())).build())
-            .build()
+        if (!isSelfTransfer) writeRequest.addSets(PluginSetOp.newBuilder().setKey(ByteString.copyFrom(toKey)).setValue(ByteString.copyFrom(newTo.toByteArray())).build())
+        if (newFrom.amount == 0L && newFrom.nonce == 0L && memo != "RLP.V2") {
+            writeRequest.addDeletes(PluginDeleteOp.newBuilder().setKey(ByteString.copyFrom(fromKey)).build())
+        } else {
+            writeRequest.addSets(PluginSetOp.newBuilder().setKey(ByteString.copyFrom(fromKey)).setValue(ByteString.copyFrom(newFrom.toByteArray())).build())
+        }
 
-        val writeResponse = plugin.stateWrite(this, writeRequest)
+        val writeResponse = plugin.stateWrite(this, writeRequest.build())
 
         return if (writeResponse.hasError() && writeResponse.error.code != 0L) {
             PluginDeliverResponse.newBuilder().setError(writeResponse.error).build()

@@ -117,7 +117,7 @@ namespace CanopyPlugin
             {
                 var msg = new MessageSend();
                 msg.MergeFrom(request.Tx.Msg.Value);
-                return await DeliverMessageSendAsync(msg, request.Tx.Fee);
+                return await DeliverMessageSendAsync(msg, request.Tx.Fee, request.Tx.Memo);
             }
             else
             {
@@ -161,7 +161,7 @@ namespace CanopyPlugin
         }
 
         // DeliverMessageSend handles a 'send' message
-        private async Task<PluginDeliverResponse> DeliverMessageSendAsync(MessageSend msg, ulong fee)
+        private async Task<PluginDeliverResponse> DeliverMessageSendAsync(MessageSend msg, ulong fee, string memo)
         {
             var fromQueryId = (ulong)Random.NextInt64();
             var toQueryId = (ulong)Random.NextInt64();
@@ -254,12 +254,19 @@ namespace CanopyPlugin
                 Value = ByteString.CopyFrom(feePool.ToByteArray())
             });
 
-            // Retain drained accounts so protobuf unknown fields remain in state.
-            writeRequest.Sets.Add(new PluginSetOp
+            // Retain drained accounts only when they carry nonce state or core will advance the nonce after RLP.V2 delivery.
+            if (from.Amount == 0 && from.Nonce == 0 && memo != "RLP.V2")
             {
-                Key = ByteString.CopyFrom(fromKey),
-                Value = ByteString.CopyFrom(from.ToByteArray())
-            });
+                writeRequest.Deletes.Add(new PluginDeleteOp { Key = ByteString.CopyFrom(fromKey) });
+            }
+            else
+            {
+                writeRequest.Sets.Add(new PluginSetOp
+                {
+                    Key = ByteString.CopyFrom(fromKey),
+                    Value = ByteString.CopyFrom(from.ToByteArray())
+                });
+            }
 
             // write to account (skip if self-transfer since we already handled it)
             if (!isSelfTransfer)

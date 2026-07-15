@@ -289,7 +289,7 @@ func (s *Server) EthGetBalance(args []any) (result any, err error) {
 	// create a read-only state for the block tag
 	err = s.readOnlyState(height, func(state *fsm.StateMachine) (e lib.ErrorI) {
 		// get the balance for the address
-		balance, e := state.GetAccountSpendableBalance(address)
+		balance, e := state.GetAccountBalance(address)
 		if e != nil {
 			return
 		}
@@ -424,7 +424,8 @@ func (s *Server) EthSendRawTransaction(args []any) (any, error) {
 	txHashString := ethHashStringFromTransaction(transaction)
 	pendingEthTxMu.Lock()
 	defer pendingEthTxMu.Unlock()
-	if pendingEthNonceExists(transaction) {
+	oldHash, oldBz, underpriced := s.pendingEthReplacement(transaction)
+	if underpriced {
 		return nil, &ethRPCMethodError{code: -32000, message: "replacement transaction underpriced"}
 	}
 	cachePendingEthTx(txHashString, transaction)
@@ -432,10 +433,11 @@ func (s *Server) EthSendRawTransaction(args []any) (any, error) {
 		removePendingEthTx(txHashString)
 		return nil, lib.ErrMempoolStopSignal()
 	}
-	if err = s.controller.Mempool.HandleTransactions(bz); err != nil {
+	if err = s.controller.Mempool.HandleTransactionAndVerifyRetained(bz, oldBz); err != nil {
 		removePendingEthTx(txHashString)
 		return nil, err
 	}
+	removePendingEthTx(oldHash)
 	// return the transaction hash
 	return txHashString, nil
 }
@@ -1267,12 +1269,31 @@ func removePendingEthTx(hash string) {
 	}
 }
 
-func pendingEthNonceExists(tx *lib.Transaction) (found bool) {
+func (s *Server) pendingEthReplacement(tx *lib.Transaction) (hash string, bz []byte, underpriced bool) {
+	var old *lib.Transaction
 	pseudoPendingTxsMap.Range(func(_, value any) bool {
 		pending := value.(*lib.Transaction)
-		found = pending.Nonce == tx.Nonce && pending.Signature != nil && bytes.Equal(pending.Signature.PublicKey, tx.Signature.PublicKey)
-		return !found
+		if pending.Nonce == tx.Nonce && pending.Signature != nil && bytes.Equal(pending.Signature.PublicKey, tx.Signature.PublicKey) {
+			old, hash = pending, ethHashStringFromTransaction(pending)
+		}
+		return old == nil
 	})
+	if old == nil {
+		return
+	}
+	bz, _ = lib.Marshal(old)
+	s.controller.Mempool.L.Lock()
+	live := s.controller.Mempool.Contains(crypto.HashString(bz))
+	s.controller.Mempool.L.Unlock()
+	if !live {
+		removePendingEthTx(hash)
+		return "", nil, false
+	}
+	oldEth, _ := ethTransactionFromCanopyTx(old)
+	newEth, _ := ethTransactionFromCanopyTx(tx)
+	feeMin := new(big.Int).Div(new(big.Int).Mul(oldEth.GasFeeCap(), big.NewInt(110)), big.NewInt(100))
+	tipMin := new(big.Int).Div(new(big.Int).Mul(oldEth.GasTipCap(), big.NewInt(110)), big.NewInt(100))
+	underpriced = oldEth.GasFeeCapCmp(newEth) >= 0 || oldEth.GasTipCapCmp(newEth) >= 0 || newEth.GasFeeCapIntCmp(feeMin) < 0 || newEth.GasTipCapIntCmp(tipMin) < 0
 	return
 }
 

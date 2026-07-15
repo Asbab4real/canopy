@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"math"
+	"math/bits"
 	"strings"
 	"time"
 
@@ -111,8 +112,10 @@ func (s *StateMachine) AccountVestedAmount(account *Account) uint64 {
 	elapsed := s.Height() - account.VestingStartHeight
 	// calculate the duration of the vesting
 	duration := account.VestingEndHeight - account.VestingStartHeight
-	// calculate the amount vested
-	return account.VestingAmount * elapsed / duration
+	// calculate the amount vested using a 128-bit intermediate to avoid overflow
+	high, low := bits.Mul64(account.VestingAmount, elapsed)
+	vested, _ := bits.Div64(high, low, duration)
+	return vested
 }
 
 // AccountLockedAmount() returns the still-locked portion of the account's vesting tranche

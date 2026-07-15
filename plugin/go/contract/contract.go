@@ -112,7 +112,7 @@ func (c *Contract) DeliverTx(request *PluginDeliverRequest) *PluginDeliverRespon
 	// handle the message
 	switch x := msg.(type) {
 	case *MessageSend:
-		return c.DeliverMessageSend(x, request.Tx.Fee)
+		return c.DeliverMessageSend(x, request.Tx.Fee, request.Tx.Memo)
 	default:
 		return &PluginDeliverResponse{Error: ErrInvalidMessageCast()}
 	}
@@ -142,7 +142,7 @@ func (c *Contract) CheckMessageSend(msg *MessageSend) *PluginCheckResponse {
 }
 
 // DeliverMessageSend() handles a 'send' message
-func (c *Contract) DeliverMessageSend(msg *MessageSend, fee uint64) *PluginDeliverResponse {
+func (c *Contract) DeliverMessageSend(msg *MessageSend, fee uint64, memo string) *PluginDeliverResponse {
 	log.Printf("DeliverMessageSend called: from=%x to=%x amount=%d fee=%d", msg.FromAddress, msg.ToAddress, msg.Amount, fee)
 	var (
 		fromKey, toKey, feePoolKey         []byte
@@ -238,13 +238,17 @@ func (c *Contract) DeliverMessageSend(msg *MessageSend, fee uint64) *PluginDeliv
 	if err != nil {
 		return &PluginDeliverResponse{Error: err}
 	}
-	// execute writes to the database
-	// Retain drained accounts so protobuf unknown fields remain in state.
-	resp, err := c.plugin.StateWrite(c, &PluginStateWriteRequest{Sets: []*PluginSetOp{
+	// Retain drained accounts only when they carry nonce state or core will advance the nonce after RLP.V2 delivery.
+	request := &PluginStateWriteRequest{Sets: []*PluginSetOp{
 		{Key: feePoolKey, Value: feePoolBytes},
 		{Key: toKey, Value: toBytes},
-		{Key: fromKey, Value: fromBytes},
-	}})
+	}}
+	if from.Amount == 0 && from.Nonce == 0 && memo != "RLP.V2" {
+		request.Deletes = []*PluginDeleteOp{{Key: fromKey}}
+	} else {
+		request.Sets = append(request.Sets, &PluginSetOp{Key: fromKey, Value: fromBytes})
+	}
+	resp, err := c.plugin.StateWrite(c, request)
 	if err != nil {
 		log.Printf("StateWrite internal error: %v", err)
 		return &PluginDeliverResponse{Error: err}

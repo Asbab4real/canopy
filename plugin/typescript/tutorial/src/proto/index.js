@@ -8942,7 +8942,7 @@ $root.types = (function() {
             if (message.chainId != null && Object.hasOwnProperty.call(message, "chainId"))
                 writer.uint32(/* id 9, wireType 0 =*/72).uint64(message.chainId);
             if (message.nonce != null && Object.hasOwnProperty.call(message, "nonce"))
-                writer.uint32(/* id 25, wireType 0 =*/200).uint64(message.nonce);
+                writer.uint32(/* id 10, wireType 0 =*/80).uint64(message.nonce);
             return writer;
         };
 
@@ -9015,7 +9015,7 @@ $root.types = (function() {
                         message.chainId = reader.uint64();
                         break;
                     }
-                case 25: {
+                case 10: {
                         message.nonce = reader.uint64();
                         break;
                     }

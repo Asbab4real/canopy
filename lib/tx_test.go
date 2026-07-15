@@ -10,10 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestTransactionNonceUsesReservedFieldNumber(t *testing.T) {
+func TestTransactionNonceUsesProtocolFieldNumber(t *testing.T) {
 	field := new(Transaction).ProtoReflect().Descriptor().Fields().ByName("nonce")
 	require.NotNil(t, field)
-	require.EqualValues(t, 25, field.Number())
+	require.EqualValues(t, 10, field.Number())
 }
 
 func TestTransactionCheckBasic(t *testing.T) {

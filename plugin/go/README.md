@@ -109,7 +109,7 @@ StateWrite() → FSM via Socket → Commits state changes
 
 - **Fee Pool**: Write the updated fee pool.
 - **Accounts**: Write the updated sender and recipient records.
-- **Drained Accounts**: Retain zero-balance sender records so nonce state and unknown protobuf fields are preserved.
+- **Drained Accounts**: Delete nonce-zero native senders; retain records with committed nonce state and senders whose nonce will advance after `RLP.V2` delivery.
 
 ### 7. State Key Structure
 

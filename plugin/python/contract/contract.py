@@ -31,6 +31,7 @@ from .proto import (
     PluginStateReadRequest,
     PluginStateWriteRequest,
     PluginSetOp,
+    PluginDeleteOp,
     PluginFSMConfig,
     FeeParams,
     Account,
@@ -228,7 +229,7 @@ class Contract:
             if type_url.endswith("/types.MessageSend"):
                 msg = MessageSend()
                 msg.ParseFromString(request.tx.msg.value)
-                return await self._deliver_message_send(msg, request.tx.fee)
+                return await self._deliver_message_send(msg, request.tx.fee, request.tx.memo)
             else:
                 raise err_invalid_message_cast()
 
@@ -269,7 +270,7 @@ class Contract:
         response.authorized_signers.append(msg.from_address)
         return response
 
-    async def _deliver_message_send(self, msg: MessageSend, fee: int) -> PluginDeliverResponse:
+    async def _deliver_message_send(self, msg: MessageSend, fee: int, memo: str) -> PluginDeliverResponse:
         """DeliverMessageSend handles a 'send' message."""
         if not self.plugin or not self.config:
             raise PluginError(1, "plugin", "plugin or config not initialized")
@@ -353,15 +354,21 @@ class Contract:
         to_bytes_new = marshal(to_account)
         fee_pool_bytes_new = marshal(fee_pool)
 
-        # Retain drained accounts so protobuf unknown fields remain in state.
+        # Retain drained accounts only when they carry nonce state or core will advance the nonce after RLP.V2 delivery.
+        sets = [
+            PluginSetOp(key=fee_pool_key, value=fee_pool_bytes_new),
+            PluginSetOp(key=to_key, value=to_bytes_new),
+        ]
+        deletes = []
+        if from_account.amount == 0 and from_account.nonce == 0 and memo != "RLP.V2":
+            deletes.append(PluginDeleteOp(key=from_key))
+        else:
+            sets.append(PluginSetOp(key=from_key, value=from_bytes_new))
         write_resp = await self.plugin.state_write(
             self,
             PluginStateWriteRequest(
-                sets=[
-                    PluginSetOp(key=fee_pool_key, value=fee_pool_bytes_new),
-                    PluginSetOp(key=to_key, value=to_bytes_new),
-                    PluginSetOp(key=from_key, value=from_bytes_new),
-                ],
+                sets=sets,
+                deletes=deletes,
             ),
         )
 

@@ -60,7 +60,7 @@ type Transaction struct {
 	// chain_id: The identity of the committee the transaction is intended for
 	ChainId uint64 `protobuf:"varint,9,opt,name=chain_id,json=chainId,proto3" json:"chainID"` // @gotags: json:"chainID"
 	// nonce: the sequence number for nonce-protected transactions
-	Nonce         uint64 `protobuf:"varint,25,opt,name=nonce,proto3" json:"nonce,omitempty"`
+	Nonce         uint64 `protobuf:"varint,10,opt,name=nonce,proto3" json:"nonce,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -338,7 +338,8 @@ const file_tx_proto_rawDesc = "" +
 	"\n" +
 	"network_id\x18\b \x01(\x04R\tnetworkId\x12\x19\n" +
 	"\bchain_id\x18\t \x01(\x04R\achainId\x12\x14\n" +
-	"\x05nonce\x18\x19 \x01(\x04R\x05nonce\"\xe0\x01\n" +
+	"\x05nonce\x18\n" +
+	" \x01(\x04R\x05nonce\"\xe0\x01\n" +
 	"\bTxResult\x12\x16\n" +
 	"\x06sender\x18\x01 \x01(\fR\x06sender\x12\x1c\n" +
 	"\trecipient\x18\x02 \x01(\fR\trecipient\x12!\n" +

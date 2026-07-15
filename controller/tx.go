@@ -216,8 +216,18 @@ func NewMempool(fsm *fsm.StateMachine, address crypto.AddressI, config lib.Mempo
 	return m, err
 }
 
-// HandleTransactions() attempts to add a transaction to the mempool by validating, adding, and evicting overfull or newly invalid txs
+// HandleTransactions() attempts to add transactions to the mempool, allowing normal fee-based eviction.
 func (m *Mempool) HandleTransactions(tx ...[]byte) (err lib.ErrorI) {
+	return m.handleTransactions(false, nil, tx...)
+}
+
+// HandleTransactionAndVerifyRetained() adds one transaction and reports if fee-based eviction removed it.
+// This is used by synchronous submission APIs and must not be used to classify peer transactions as invalid.
+func (m *Mempool) HandleTransactionAndVerifyRetained(tx, replace []byte) lib.ErrorI {
+	return m.handleTransactions(true, replace, tx)
+}
+
+func (m *Mempool) handleTransactions(verifyRetained bool, replace []byte, tx ...[]byte) (err lib.ErrorI) {
 	// lock the mempool
 	m.L.Lock()
 	defer m.L.Unlock()
@@ -231,10 +241,11 @@ func (m *Mempool) HandleTransactions(tx ...[]byte) (err lib.ErrorI) {
 	if recheck {
 		m.dirtyVersion.Add(1)
 	}
-	for _, bz := range tx {
-		if !m.Contains(crypto.HashString(bz)) {
-			return lib.NewError(lib.CodeInvalidArgument, lib.ConsensusModule, "transaction evicted from mempool")
-		}
+	if verifyRetained && !m.Contains(crypto.HashString(tx[0])) {
+		return lib.NewError(lib.CodeInvalidArgument, lib.ConsensusModule, "transaction evicted from mempool")
+	}
+	if len(replace) != 0 {
+		m.DeleteTransaction(replace)
 	}
 	// exit
 	return

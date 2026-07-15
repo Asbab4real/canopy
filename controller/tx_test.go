@@ -56,7 +56,9 @@ func TestHandleTransactionsOnlyMarksDirtyOnSuccessfulNewTx(t *testing.T) {
 	config := lib.DefaultMempoolConfig()
 	config.MaxTransactionCount = 1
 	m = &Mempool{Mempool: lib.NewMempool(config), L: &sync.Mutex{}}
-	require.ErrorContains(t, m.HandleTransactions(txBytes), "evicted from mempool")
+	require.NoError(t, m.HandleTransactions(txBytes))
+	require.False(t, m.Contains(crypto.HashString(txBytes)))
+	require.ErrorContains(t, m.HandleTransactionAndVerifyRetained(txBytes, nil), "evicted from mempool")
 }
 
 func TestGetPendingTxByHashUsesCachedResults(t *testing.T) {
