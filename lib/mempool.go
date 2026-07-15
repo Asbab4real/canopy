@@ -220,8 +220,8 @@ type MempoolTxs struct {
 func (t *MempoolTxs) insert(txs ...MempoolTx) {
 	// combine existing and incoming txs
 	combined := append(t.s, txs...)
-	// sort by Fee descending
-	sort.Slice(combined, func(i, j int) bool {
+	// sort by fee descending while preserving arrival order among equal-fee transactions
+	sort.SliceStable(combined, func(i, j int) bool {
 		return combined[i].Fee > combined[j].Fee
 	})
 	// prepare new map and slice

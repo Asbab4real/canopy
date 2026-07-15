@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"log"
+	"math"
 	"math/rand"
 
 	"google.golang.org/protobuf/proto"
@@ -189,8 +190,6 @@ func (c *Contract) DeliverMessageSend(msg *MessageSend, fee uint64) *PluginDeliv
 			log.Printf("feePoolBytes len=%d", len(feePoolBytes))
 		}
 	}
-	// add fee to 'amount to deduct'
-	amountToDeduct := msg.Amount + fee
 	// convert the bytes to account structures
 	if err = Unmarshal(fromBytes, from); err != nil {
 		return &PluginDeliverResponse{Error: err}
@@ -201,6 +200,10 @@ func (c *Contract) DeliverMessageSend(msg *MessageSend, fee uint64) *PluginDeliv
 	if err = Unmarshal(feePoolBytes, feePool); err != nil {
 		return &PluginDeliverResponse{Error: err}
 	}
+	if msg.Amount > math.MaxUint64-fee {
+		return &PluginDeliverResponse{Error: ErrInvalidAmount()}
+	}
+	amountToDeduct := msg.Amount + fee
 	log.Printf("from.Amount=%d to.Amount=%d feePool.Amount=%d", from.Amount, to.Amount, feePool.Amount)
 	// if the account amount is less than the amount to subtract; return insufficient funds
 	if from.Amount < amountToDeduct {
@@ -208,8 +211,12 @@ func (c *Contract) DeliverMessageSend(msg *MessageSend, fee uint64) *PluginDeliv
 		return &PluginDeliverResponse{Error: ErrInsufficientFunds()}
 	}
 	// for self-transfer, use same account data
-	if bytes.Equal(fromKey, toKey) {
+	isSelfTransfer := bytes.Equal(fromKey, toKey)
+	if isSelfTransfer {
 		to = from
+	}
+	if feePool.Amount > math.MaxUint64-fee || (!isSelfTransfer && to.Amount > math.MaxUint64-msg.Amount) {
+		return &PluginDeliverResponse{Error: ErrInvalidAmount()}
 	}
 	// subtract from sender
 	from.Amount -= amountToDeduct
@@ -232,25 +239,12 @@ func (c *Contract) DeliverMessageSend(msg *MessageSend, fee uint64) *PluginDeliv
 		return &PluginDeliverResponse{Error: err}
 	}
 	// execute writes to the database
-	var resp *PluginStateWriteResponse
-	// if the from account is drained - delete the from account
-	if from.Amount == 0 {
-		resp, err = c.plugin.StateWrite(c, &PluginStateWriteRequest{
-			Sets: []*PluginSetOp{
-				{Key: feePoolKey, Value: feePoolBytes},
-				{Key: toKey, Value: toBytes},
-			},
-			Deletes: []*PluginDeleteOp{{Key: fromKey}},
-		})
-	} else {
-		resp, err = c.plugin.StateWrite(c, &PluginStateWriteRequest{
-			Sets: []*PluginSetOp{
-				{Key: feePoolKey, Value: feePoolBytes},
-				{Key: toKey, Value: toBytes},
-				{Key: fromKey, Value: fromBytes},
-			},
-		})
-	}
+	// Retain drained accounts so protobuf unknown fields remain in state.
+	resp, err := c.plugin.StateWrite(c, &PluginStateWriteRequest{Sets: []*PluginSetOp{
+		{Key: feePoolKey, Value: feePoolBytes},
+		{Key: toKey, Value: toBytes},
+		{Key: fromKey, Value: fromBytes},
+	}})
 	if err != nil {
 		log.Printf("StateWrite internal error: %v", err)
 		return &PluginDeliverResponse{Error: err}

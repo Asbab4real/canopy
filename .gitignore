@@ -42,6 +42,7 @@ vendor
 .docker/.env
 .docker/volumes/
 .env
+.local/
 
 .docs/TIMELOG.md
 .docs/WISHLIST.md

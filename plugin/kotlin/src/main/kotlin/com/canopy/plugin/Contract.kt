@@ -234,18 +234,31 @@ class Contract(
         var to = if (toBytes.isNotEmpty()) Account.parseFrom(toBytes) else Account.getDefaultInstance()
         val feePool = if (feePoolBytes.isNotEmpty()) Pool.parseFrom(feePoolBytes) else Pool.getDefaultInstance()
 
+        if (java.lang.Long.compareUnsigned(msg.amount, -1L - fee) > 0) {
+            return PluginDeliverResponse.newBuilder()
+                .setError(ErrInvalidAmount().toProto())
+                .build()
+        }
         val amountToDeduct = msg.amount + fee
 
         // Check sufficient funds
-        if (from.amount < amountToDeduct) {
+        if (java.lang.Long.compareUnsigned(from.amount, amountToDeduct) < 0) {
             return PluginDeliverResponse.newBuilder()
                 .setError(ErrInsufficientFunds().toProto())
                 .build()
         }
 
         // For self-transfer, use same account
-        if (fromKey.contentEquals(toKey)) {
+        val isSelfTransfer = fromKey.contentEquals(toKey)
+        if (isSelfTransfer) {
             to = from
+        }
+
+        if (java.lang.Long.compareUnsigned(feePool.amount, -1L - fee) > 0 ||
+            (!isSelfTransfer && java.lang.Long.compareUnsigned(to.amount, -1L - msg.amount) > 0)) {
+            return PluginDeliverResponse.newBuilder()
+                .setError(ErrInvalidAmount().toProto())
+                .build()
         }
 
         // Update balances
@@ -253,21 +266,12 @@ class Contract(
         val newTo = to.toBuilder().setAmount(to.amount + msg.amount).build()
         val newFeePool = feePool.toBuilder().setAmount(feePool.amount + fee).build()
 
-        // Write state
-        val writeRequest = if (newFrom.amount == 0L) {
-            // Delete drained account
-            PluginStateWriteRequest.newBuilder()
-                .addSets(PluginSetOp.newBuilder().setKey(ByteString.copyFrom(feePoolKey)).setValue(ByteString.copyFrom(newFeePool.toByteArray())).build())
-                .addSets(PluginSetOp.newBuilder().setKey(ByteString.copyFrom(toKey)).setValue(ByteString.copyFrom(newTo.toByteArray())).build())
-                .addDeletes(PluginDeleteOp.newBuilder().setKey(ByteString.copyFrom(fromKey)).build())
-                .build()
-        } else {
-            PluginStateWriteRequest.newBuilder()
-                .addSets(PluginSetOp.newBuilder().setKey(ByteString.copyFrom(feePoolKey)).setValue(ByteString.copyFrom(newFeePool.toByteArray())).build())
-                .addSets(PluginSetOp.newBuilder().setKey(ByteString.copyFrom(toKey)).setValue(ByteString.copyFrom(newTo.toByteArray())).build())
-                .addSets(PluginSetOp.newBuilder().setKey(ByteString.copyFrom(fromKey)).setValue(ByteString.copyFrom(newFrom.toByteArray())).build())
-                .build()
-        }
+        // Retain drained accounts so protobuf unknown fields remain in state.
+        val writeRequest = PluginStateWriteRequest.newBuilder()
+            .addSets(PluginSetOp.newBuilder().setKey(ByteString.copyFrom(feePoolKey)).setValue(ByteString.copyFrom(newFeePool.toByteArray())).build())
+            .addSets(PluginSetOp.newBuilder().setKey(ByteString.copyFrom(toKey)).setValue(ByteString.copyFrom(newTo.toByteArray())).build())
+            .addSets(PluginSetOp.newBuilder().setKey(ByteString.copyFrom(fromKey)).setValue(ByteString.copyFrom(newFrom.toByteArray())).build())
+            .build()
 
         val writeResponse = plugin.stateWrite(this, writeRequest)
 

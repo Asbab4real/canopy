@@ -2,6 +2,12 @@
 GO_BIN_DIR := ~/go/bin
 CLI_DIR := ./cmd/main/...
 AUTO_UPDATE_DIR := ./cmd/auto-update/...
+HTTPS_PROXY_DIR := ./cmd/dev/httpsproxy
+LOCAL_HTTPS_CERT_DIR := ./.local/certs
+HTTPS_CERT ?= $(LOCAL_HTTPS_CERT_DIR)/canopy.rpc.pem
+HTTPS_KEY ?= $(LOCAL_HTTPS_CERT_DIR)/canopy.rpc-key.pem
+HTTPS_LISTEN ?= 127.0.0.1:8443
+HTTPS_UPSTREAM ?= http://127.0.0.1:50002
 WALLET_DIR := ./cmd/rpc/web/wallet
 EXPLORER_DIR := ./cmd/rpc/web/explorer
 DOCKER_DIR := ./.docker/compose.yaml
@@ -21,6 +27,7 @@ help:
 	docker/down docker/build docker/up-fast docker/down docker/logs \
 	build/plugin build/kotlin-plugin build/go-plugin build/all-plugins docker/plugin \
 	docker/run docker/run-kotlin docker/run-go docker/run-typescript docker/run-python docker/run-csharp \
+	dev/https-cert run/https-rpc-proxy \
 	docker/auto-update docker/auto-update-all
 
 # ==================================================================================== #
@@ -81,6 +88,18 @@ test/fuzz:
 ## dev/deps: install all dependencies on the project's directory
 dev/deps:
 	go mod vendor
+
+## dev/https-cert: generate a local TLS cert for canopy.rpc into ./.local/certs
+dev/https-cert:
+	./scripts/local-https/generate-canopy-rpc-cert.sh
+
+## run/https-rpc-proxy: run a local HTTPS proxy for canopy.rpc to the Canopy RPC
+run/https-rpc-proxy:
+	go run $(HTTPS_PROXY_DIR) \
+		-listen $(HTTPS_LISTEN) \
+		-upstream $(HTTPS_UPSTREAM) \
+		-cert $(HTTPS_CERT) \
+		-key $(HTTPS_KEY)
 
 # Detect OS to run the docker compose command, this is because Docker for MacOS does not support the
 # modern docker compose command and still uses the legacy docker-compose

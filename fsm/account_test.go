@@ -24,6 +24,20 @@ func TestT(t *testing.T) {
 	}))
 }
 
+func TestAccountJSONPreservesNonce(t *testing.T) {
+	expected := &Account{
+		Address: newTestAddress(t).Bytes(),
+		Amount:  100,
+		Nonce:   7,
+	}
+	bz, err := json.Marshal(expected)
+	require.NoError(t, err)
+
+	got := new(Account)
+	require.NoError(t, json.Unmarshal(bz, got))
+	require.Equal(t, expected.Nonce, got.Nonce)
+}
+
 func TestSetGetAccount(t *testing.T) {
 	tests := []struct {
 		name     string
