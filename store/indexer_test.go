@@ -107,7 +107,7 @@ func newRLPBackedTxResult(t *testing.T) (*lib.TxResult, common.Hash) {
 		Height:    testHeight,
 		Index:     0,
 		Transaction: &lib.Transaction{
-			Memo:      "RLP",
+			Memo:      lib.RLPIndicator,
 			Signature: &lib.Signature{Signature: rawEthTx},
 		},
 		TxHash: hex.EncodeToString(protoHash),

@@ -37,10 +37,10 @@ const EditOrderSelector = "74e78d6f"   // while the signature is editOrder(bytes
 const DeleteOrderSelector = "6c4650e7" // while the signature is deleteOrder(bytes), Canopy expects (selector + proto-bytes)
 
 // RLPIndicator is the legacy indicator for RLP-backed transactions that map Ethereum nonce onto CreatedHeight.
-const RLPIndicator = "RLP"
+const RLPIndicator = lib.RLPIndicator
 
 // RLPV2Indicator uses the dedicated tx nonce field and a canonical CreatedHeight sentinel.
-const RLPV2Indicator = "RLP.V2"
+const RLPV2Indicator = lib.RLPV2Indicator
 
 // RLPV2CreatedHeight is a canonical sentinel. RLP.V2 replay protection is provided by the
 // account nonce, so its wrapper must not contain mutable, unsigned height metadata.
@@ -53,7 +53,7 @@ const EthereumBaseFeePerGas int64 = 10_000_000_000
 const legacyRLPDisabledProtocolVersion = 2
 
 // IsRLPMemo reports whether the memo indicates an RLP-backed Ethereum transaction.
-func IsRLPMemo(memo string) bool { return memo == RLPIndicator || memo == RLPV2Indicator }
+func IsRLPMemo(memo string) bool { return lib.IsRLPMemo(memo) }
 
 func ethereumTxHashFromRawBytes(txBytes []byte) ([]byte, lib.ErrorI) {
 	var tx ethTypes.Transaction
