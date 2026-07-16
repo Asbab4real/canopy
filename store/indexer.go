@@ -7,6 +7,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/canopy-network/canopy/fsm"
 	"github.com/canopy-network/canopy/lib"
 	"github.com/canopy-network/canopy/lib/crypto"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -302,7 +303,7 @@ func indexedTxHashes(result *lib.TxResult) ([][]byte, lib.ErrorI) {
 
 // ethTxHash() returns the canonical Ethereum tx hash for an RLP-backed transaction.
 func ethTxHash(tx *lib.Transaction) []byte {
-	if tx == nil || (tx.Memo != "RLP" && tx.Memo != "RLP.V2") || tx.Signature == nil || len(tx.Signature.Signature) == 0 {
+	if tx == nil || !fsm.IsRLPMemo(tx.Memo) || tx.Signature == nil || len(tx.Signature.Signature) == 0 {
 		return nil
 	}
 	var ethTx types.Transaction
